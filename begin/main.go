@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"time"
 )
 
 func main() {
@@ -57,6 +56,7 @@ func netRequest(metod, url string) (resp string, err error) {
 func printScr(url string) {
 	str, _ := netRequest("get", url)
 	fmt.Print(str)
+	ch <- 1
 }
 func printFile(url, fname string) {
 	str, _ := netRequest("get", url)
@@ -66,6 +66,7 @@ func printFile(url, fname string) {
 	fwr := bufio.NewWriter(file)
 	fwr.Write([]byte(str))
 	fwr.Flush()
+	ch <- 1
 }
 
 func task1() {
@@ -78,6 +79,8 @@ func task3() {
 	printScr(url)
 }
 
+var ch chan int = make(chan int)
+
 func task4() {
 	page := "posts/"
 	url := ""
@@ -85,7 +88,10 @@ func task4() {
 		url = netResource + page + strconv.Itoa(i)
 		go printScr(url)
 	}
-	time.Sleep(time.Second * 3)
+	for j := 1; j <= 100; {
+		j += <-ch
+	}
+	//time.Sleep(time.Second * 3)
 }
 
 func task5() {
@@ -103,9 +109,18 @@ func task5() {
 		fname := path + strconv.Itoa(i) + ".txt"
 		go printFile(url, fname)
 	}
-	time.Sleep(time.Second * 5)
+	for j := 1; j <= 100; {
+		j += <-ch
+	}
+	//time.Sleep(time.Second * 5)
 }
 
 func task6() {
-
+	/*
+		   получить json posts?userId=7  обработать: получить структуру постов
+		   в горутины 1го ур выдавать по элементу(посту) структуры
+		   		в этой рутине произвести запись поста в БД, получить json comments?postId обработать: получить структуру комментов
+		   		в горутины 2го ур выдавать по элементу(комменту) структуры
+				   в этой рутине произвести запись коммента
+	*/
 }
