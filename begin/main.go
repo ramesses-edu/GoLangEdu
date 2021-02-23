@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -123,6 +124,7 @@ func task5() {
 type workbchDB struct {
 	DBname, user, password, host string
 	link                         *sql.DB
+	mux                          sync.Mutex
 }
 
 func (wDB *workbchDB) connectMySQL() (*sql.DB, error) {
@@ -135,28 +137,33 @@ func (wDB *workbchDB) connectMySQL() (*sql.DB, error) {
 	wDB.link = db
 	return db, err
 }
-func (wdb *workbchDB) createTable(tname string, s interface{}) {
-	/* stmt, err := db.Prepare(createTable)
-		if err != nil {
-			panic(err)
-		}
-		defer stmt.Close()
 
-		_, err = stmt.Exec()
-		if err != nil {
-			panic(err)
-		}
+type tableStruct struct {
+	tname     string
+	colStruct map[string]string
+}
+
+func (wdb *workbchDB) createTable(ts tableStruct) {
+	createT := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (", ts.tname)
+	for colN, colT := range ts.colStruct {
+		tmpstr := fmt.Sprintf("`%s` %s,", colN, colT)
+		createT += tmpstr
 	}
+	createT = createT[:len(createT)-1]
+	createT += ");"
+	stat, err := wdb.link.Prepare(createT)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stat.Close()
 
-	var createTable = `
-	CREATE TABLE IF NOT EXISTS people (
-	     user_id      INTEGER PRIMARY KEY AUTO_INCREMENT
-	    ,username     VARCHAR(32)
-	    ,phone        VARCHAR(32)
-	); */
+	_, err = stat.Exec()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 func (wdb *workbchDB) dropTable(tname string) bool {
-	dropT := fmt.Sprintf("DROP TABLE %s;", tname)
+	dropT := fmt.Sprintf("DROP TABLE IF EXISTS %s;", tname)
 	stat, err := wdb.link.Prepare(dropT)
 	if err != nil {
 		log.Fatal(err)
@@ -185,28 +192,63 @@ type Comment struct {
 	Body   string
 }
 type ElemReq interface {
-	writeDB()
+	writeDB(wdb *workbchDB)
 }
 
-func (p *Post) writeDB() {
+func (p *Post) writeDB(wdb *workbchDB) {
 	fmt.Println(p.Id)
+	sql := fmt.Sprintf(`INSERT INTO posts(UserId, Id, Title, Body) VALUES(%d , %d, "%s", "%s");`, p.UserId, p.Id, p.Title, p.Body)
+	stat, err := wdb.link.Prepare(sql)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stat.Close()
+	wdb.mux.Lock()
+	_, err = stat.Exec()
+	wdb.mux.Unlock()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
-func (c *Comment) writeDB() {
+func (c *Comment) writeDB(wdb *workbchDB) {
 	fmt.Println(c.Id)
+	sql := fmt.Sprintf(`INSERT INTO comments(PostId, Id, Name, Email,Body) VALUES(%d , %d, "%s", "%s", "%s");`, c.PostId, c.Id, c.Name, c.Email, c.Body)
+	stat, err := wdb.link.Prepare(sql)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stat.Close()
+	wdb.mux.Lock()
+	_, err = stat.Exec()
+	wdb.mux.Unlock()
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func task6() {
-	/*
-		   получить json posts?userId=7  обработать: получить структуру постов
-		   в горутины 1го ур(анонимные функции) выдавать по элементу(посту) структуры
-		   		в этой рутине произвести запись поста в БД, получить json comments?postId обработать: получить структуру комментов
-		   		в горутины 2го ур выдавать по элементу(комменту) структуры
-				   в этой рутине произвести запись коммента
-	*/
 	wdb := workbchDB{DBname: "edudb", user: "utest", password: "12345", host: "localhost:3306"}
 	db, _ := wdb.connectMySQL()
 	defer db.Close()
-	db
+	columnsPosts := map[string]string{
+		"UserId": "INT",
+		"Id":     "INT PRIMARY KEY",
+		"Title":  "VARCHAR(255)",
+		"Body":   "VARCHAR(255)",
+	}
+	var tsPosts = tableStruct{"posts", columnsPosts}
+	wdb.dropTable("posts")
+	wdb.createTable(tsPosts)
+	columnsComments := map[string]string{
+		"PostId": "INT",
+		"Id":     "INT PRIMARY KEY",
+		"Name":   "VARCHAR(255)",
+		"Email":  "VARCHAR(255)",
+		"Body":   "VARCHAR(255)",
+	}
+	var tsComments = tableStruct{"comments", columnsComments}
+	wdb.dropTable("comments")
+	wdb.createTable(tsComments)
 	url := netResource + "posts?userId=7"
 	resp, _ := netRequest("get", url)
 	var posts []Post
@@ -225,11 +267,13 @@ func task6() {
 }
 
 func write2DB(wdb *workbchDB, e ElemReq) {
-	//использовать мьютексы во время инсертов
-
+	e.writeDB(wdb)
 }
 
 func procPost(wdb *workbchDB, p Post, ch chan int) {
+	var e ElemReq
+	e = &p
+	write2DB(wdb, e)
 	url := netResource + "comments?postId=" + strconv.Itoa(p.Id)
 	resp, _ := netRequest("get", url)
 	var comments []Comment
@@ -249,6 +293,8 @@ func procPost(wdb *workbchDB, p Post, ch chan int) {
 }
 
 func procComment(wdb *workbchDB, c Comment, ch chan int) {
-	fmt.Println(c)
+	var e ElemReq
+	e = &c
+	write2DB(wdb, e)
 	ch <- 1
 }
