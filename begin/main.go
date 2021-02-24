@@ -127,14 +127,14 @@ type workbchDB struct {
 	mux                          sync.Mutex
 }
 
-func (wDB *workbchDB) connectMySQL() (*sql.DB, error) {
+func (wdb *workbchDB) connectMySQL() (*sql.DB, error) {
 	driverName := "mysql"
-	connectString := fmt.Sprintf("%s:%s@tcp(%s)/%s", wDB.user, wDB.password, wDB.host, wDB.DBname)
+	connectString := fmt.Sprintf("%s:%s@tcp(%s)/%s", wdb.user, wdb.password, wdb.host, wdb.DBname)
 	db, err := sql.Open(driverName, connectString)
 	if err != nil {
 		log.Fatal(err)
 	}
-	wDB.link = db
+	wdb.link = db
 	return db, err
 }
 
@@ -178,26 +178,26 @@ func (wdb *workbchDB) dropTable(tname string) bool {
 	return true
 }
 
-type Post struct {
-	UserId int
-	Id     int
-	Title  string
-	Body   string
+type post struct {
+	UserID int    `json:"userId"`
+	ID     int    `json:"id"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
 }
-type Comment struct {
-	PostId int
-	Id     int
-	Name   string
-	Email  string
-	Body   string
+type comment struct {
+	PostID int    `json:"postId"`
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+	Body   string `json:"body"`
 }
-type ElemReq interface {
+type elemReq interface {
 	writeDB(wdb *workbchDB)
 }
 
-func (p *Post) writeDB(wdb *workbchDB) {
-	fmt.Println(p.Id)
-	sql := fmt.Sprintf(`INSERT INTO posts(UserId, Id, Title, Body) VALUES(%d , %d, "%s", "%s");`, p.UserId, p.Id, p.Title, p.Body)
+func (p *post) writeDB(wdb *workbchDB) {
+	fmt.Println(p.ID)
+	sql := fmt.Sprintf(`INSERT INTO posts(UserId, Id, Title, Body) VALUES(%d , %d, "%s", "%s");`, p.UserID, p.ID, p.Title, p.Body)
 	stat, err := wdb.link.Prepare(sql)
 	if err != nil {
 		log.Fatal(err)
@@ -210,9 +210,9 @@ func (p *Post) writeDB(wdb *workbchDB) {
 		log.Fatal(err)
 	}
 }
-func (c *Comment) writeDB(wdb *workbchDB) {
-	fmt.Println(c.Id)
-	sql := fmt.Sprintf(`INSERT INTO comments(PostId, Id, Name, Email,Body) VALUES(%d , %d, "%s", "%s", "%s");`, c.PostId, c.Id, c.Name, c.Email, c.Body)
+func (c *comment) writeDB(wdb *workbchDB) {
+	fmt.Println(c.ID)
+	sql := fmt.Sprintf(`INSERT INTO comments(PostId, Id, Name, Email,Body) VALUES(%d , %d, "%s", "%s", "%s");`, c.PostID, c.ID, c.Name, c.Email, c.Body)
 	stat, err := wdb.link.Prepare(sql)
 	if err != nil {
 		log.Fatal(err)
@@ -231,27 +231,27 @@ func task6() {
 	db, _ := wdb.connectMySQL()
 	defer db.Close()
 	columnsPosts := map[string]string{
-		"UserId": "INT",
-		"Id":     "INT PRIMARY KEY",
-		"Title":  "VARCHAR(255)",
-		"Body":   "VARCHAR(255)",
+		"userId": "INT",
+		"id":     "INT PRIMARY KEY",
+		"title":  "VARCHAR(255)",
+		"body":   "VARCHAR(255)",
 	}
 	var tsPosts = tableStruct{"posts", columnsPosts}
 	wdb.dropTable("posts")
 	wdb.createTable(tsPosts)
 	columnsComments := map[string]string{
-		"PostId": "INT",
-		"Id":     "INT PRIMARY KEY",
-		"Name":   "VARCHAR(255)",
-		"Email":  "VARCHAR(255)",
-		"Body":   "VARCHAR(255)",
+		"postId": "INT",
+		"id":     "INT PRIMARY KEY",
+		"name":   "VARCHAR(255)",
+		"email":  "VARCHAR(255)",
+		"body":   "VARCHAR(255)",
 	}
 	var tsComments = tableStruct{"comments", columnsComments}
 	wdb.dropTable("comments")
 	wdb.createTable(tsComments)
 	url := netResource + "posts?userId=7"
 	resp, _ := netRequest("get", url)
-	var posts []Post
+	var posts []post
 	err := json.Unmarshal([]byte(resp), &posts)
 	if err != nil {
 		log.Fatal(err)
@@ -266,17 +266,17 @@ func task6() {
 	close(ch1)
 }
 
-func write2DB(wdb *workbchDB, e ElemReq) {
+func write2DB(wdb *workbchDB, e elemReq) {
 	e.writeDB(wdb)
 }
 
-func procPost(wdb *workbchDB, p Post, ch chan int) {
-	var e ElemReq
+func procPost(wdb *workbchDB, p post, ch chan int) {
+	var e elemReq
 	e = &p
 	write2DB(wdb, e)
-	url := netResource + "comments?postId=" + strconv.Itoa(p.Id)
+	url := netResource + "comments?postId=" + strconv.Itoa(p.ID)
 	resp, _ := netRequest("get", url)
-	var comments []Comment
+	var comments []comment
 	err := json.Unmarshal([]byte(resp), &comments)
 	if err != nil {
 		log.Fatal(err)
@@ -292,8 +292,8 @@ func procPost(wdb *workbchDB, p Post, ch chan int) {
 	ch <- 1
 }
 
-func procComment(wdb *workbchDB, c Comment, ch chan int) {
-	var e ElemReq
+func procComment(wdb *workbchDB, c comment, ch chan int) {
+	var e elemReq
 	e = &c
 	write2DB(wdb, e)
 	ch <- 1
