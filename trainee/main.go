@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,8 +26,12 @@ var (
 	mux         sync.Mutex
 )
 
+type users struct {
+	XMLName xml.Name `xml:"users" json:"-" gorm:"-"`
+	Users   interface{}
+}
 type user struct {
-	User     xml.Name `xml:"User" json:"-" gorm:"-"`
+	XMLName  xml.Name `xml:"user" json:"-" gorm:"-"`
 	ID       int      `xml:"Id" json:"id" gorm:"column:id;primaryKey"`
 	Name     string
 	Username string
@@ -35,7 +42,7 @@ type user struct {
 	Company  company `gorm:"-"`
 }
 type address struct {
-	Address xml.Name `xml:"Address" json:"-" gorm:"-"`
+	XMLName xml.Name `xml:"address" json:"-" gorm:"-"`
 	ID      int      `xml:"-" json:"-" gorm:"primaryKey"`
 	UserID  int      `xml:"-" json:"-" gorm:"column:userId"`
 	Street  string
@@ -45,14 +52,14 @@ type address struct {
 	Geo     geo `gorm:"-"`
 }
 type geo struct {
-	Geo       xml.Name `xml:"Geo" json:"-" gorm:"-"`
+	XMLName   xml.Name `xml:"geo" json:"-" gorm:"-"`
 	ID        int      `xml:"-" json:"-" gorm:"primaryKey"`
 	AddressID int      `xml:"-" json:"-" gorm:"column:addressId"`
 	Lat       float32
 	Lng       float32
 }
 type company struct {
-	Company     xml.Name `xml:"Company" json:"-" gorm:"-"`
+	XMLName     xml.Name `xml:"company" json:"-" gorm:"-"`
 	Name        string
 	CatchPhrase string
 	Bs          string
@@ -61,15 +68,25 @@ type company struct {
 }
 
 ///////////////////////////////////////////////////////////////////////////
+type posts struct {
+	XMLName xml.Name `xml:"posts" json:"-" gorm:"-"`
+	Posts   interface{}
+}
 type post struct {
-	Post   xml.Name `xml:"Post" json:"-" gorm:"-"`
-	UserID int      `json:"userId" gorm:"column:userId"`
-	ID     int      `json:"id" gorm:"column:id;primaryKey"`
-	Title  string   `json:"title" gorm:"column:title;type:VARCHAR(256)"`
-	Body   string   `json:"body" gorm:"column:body;type:VARCHAR(256)"`
+	XMLName xml.Name `xml:"post" json:"-" gorm:"-"`
+	UserID  int      `json:"userId" gorm:"column:userId"`
+	ID      int      `json:"id" gorm:"column:id;primaryKey"`
+	Title   string   `json:"title" gorm:"column:title;type:VARCHAR(256)"`
+	Body    string   `json:"body" gorm:"column:body;type:VARCHAR(256)"`
+}
+
+//////////////////////////////////////////////////////////////////////////
+type comments struct {
+	XMLName  xml.Name `xml:"comments" json:"-" gorm:"-"`
+	Comments interface{}
 }
 type comment struct {
-	Comment xml.Name `xml:"Comment" json:"-" gorm:"-"`
+	XMLName xml.Name `xml:"comment" json:"-" gorm:"-"`
 	PostID  int      `json:"postId" gorm:"column:postId"`
 	ID      int      `json:"id" gorm:"column:id;primaryKey"`
 	Name    string   `json:"name" gorm:"column:name;type:VARCHAR(256)"`
@@ -120,10 +137,15 @@ func handleFunc(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	switch r.Method {
 	case http.MethodGet:
+		//SELECT
 		methodGet(w, r, db)
 	case http.MethodPost:
+		//INSERT
+		metodPOST(w, r, db)
 	case http.MethodPut:
+		//UPDATE
 	case http.MethodDelete:
+		//DELETE
 	}
 
 }
@@ -136,20 +158,74 @@ func methodGet(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			break
 		}
 	}
-	fmt.Fprintf(w, "Hello \n")
-	fmt.Fprintf(w, "URI %q \n", r.RequestURI)
-	fmt.Fprintf(w, "URL %q \n", r.URL)
-	fmt.Fprintf(w, "Path %q \n", r.URL.Path)
-	fmt.Fprintf(w, "formatXML %t", formatXML)
-	//var p user
-	//getFromDB(db, p, map[string]interface{}{"ID": 1})
+	reObj := regexp.MustCompile(`^(\/[a-zA-Z]+)(\/)??$`)     // любой /aaaaa или /aaaaa/
+	reID := regexp.MustCompile(`^(\/[a-zA-Z]+\/)\d+(\/)??$`) // любой /aaaaa/111  или /aaaaa/11111/
+	reSymb := regexp.MustCompile(`[a-zA-Z]+`)
+	reNum := regexp.MustCompile(`[0-9]+`)
+
+	var mode string
+	var id int = 0
+	if reID.Match([]byte(r.URL.Path)) {
+		mode = reSymb.FindString(r.URL.Path)
+		idStr := reNum.FindString(r.URL.Path)
+		if idStr != "" {
+			id, _ = strconv.Atoi(idStr)
+		}
+	} else if reObj.Match([]byte(r.URL.Path)) {
+		mode = reSymb.FindString(r.URL.Path)
+	}
+	var param map[string]interface{} = make(map[string]interface{})
+	if id > 0 {
+		param["id"] = id
+	}
+	switch mode {
+	case "users":
+		u := "user"
+		if formatXML {
+			w.Header().Set("Content-Type", "application/xml")
+			var users users
+			users.Users = getFromDB(db, u, param)
+			xmlB, _ := xml.MarshalIndent(users, "", "  ")
+			fmt.Fprint(w, string(xmlB))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			jsonB, _ := json.MarshalIndent(getFromDB(db, u, param), "", "  ")
+			fmt.Fprint(w, string(jsonB))
+		}
+	case "posts":
+		p := "post"
+		if formatXML {
+			w.Header().Set("Content-Type", "application/xml")
+			var posts posts
+			posts.Posts = getFromDB(db, p, param)
+			xmlB, _ := xml.MarshalIndent(posts, "", "  ")
+			fmt.Fprint(w, string(xmlB))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			jsonB, _ := json.MarshalIndent(getFromDB(db, p, param), "", "  ")
+			fmt.Fprint(w, string(jsonB))
+		}
+	case "comments":
+		c := "comment"
+		if formatXML {
+			w.Header().Set("Content-Type", "application/xml")
+			var comments comments
+			comments.Comments = getFromDB(db, c, param)
+			xmlB, _ := xml.MarshalIndent(comments, "", "  ")
+			fmt.Fprint(w, string(xmlB))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			jsonB, _ := json.MarshalIndent(getFromDB(db, c, param), "", "  ")
+			fmt.Fprint(w, string(jsonB))
+		}
+	default:
+		body, _ := ioutil.ReadFile("./index.html")
+		fmt.Fprint(w, string(body))
+	}
 }
 
-//
-//map с параметрами для gorm
-func getFromDB(db *gorm.DB, obj interface{}, param map[string]interface{}) interface{} {
-	typeObj := reflect.TypeOf(obj)
-	switch strings.ToLower(typeObj.Name()) {
+func getFromDB(db *gorm.DB, obj string, param map[string]interface{}) interface{} {
+	switch obj {
 	case "user":
 		var users []user
 		db.Where(param).Find(&users)
@@ -183,28 +259,124 @@ func getFromDB(db *gorm.DB, obj interface{}, param map[string]interface{}) inter
 	return nil
 }
 
+type responseStatus struct {
+	Status      string `json:"status"`
+	Description string `json:"description"`
+}
+
+func metodPOST(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	reObj := regexp.MustCompile(`^(\/[a-zA-Z]+)(\/)??$`) // любой /aaaaa или /aaaaa/
+	//reID := regexp.MustCompile(`^(\/[a-zA-Z]+\/)\d+(\/)??$`) // любой /aaaaa/111  или /aaaaa/11111/
+	reSymb := regexp.MustCompile(`[a-zA-Z]+`)
+	//reNum := regexp.MustCompile(`[0-9]+`)
+
+	if !reObj.Match([]byte(r.URL.Path)) {
+		answer, _ := json.MarshalIndent(&responseStatus{Status: "error", Description: "wrong URI"}, "", "  ")
+		fmt.Fprint(w, string(answer))
+		return
+	}
+	mode := reSymb.FindString(r.URL.Path)
+	switch mode {
+	case "users":
+		reqBody, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			fmt.Println(err)
+		}
+		var u user
+		json.Unmarshal(reqBody, &u)
+		if insert2DB(db, u) == nil {
+			answer, _ := json.MarshalIndent(&responseStatus{Status: "OK", Description: "OK"}, "", "  ")
+			fmt.Fprint(w, string(answer))
+		}
+	case "posts":
+		reqBody, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			fmt.Println(err)
+		}
+		var p post
+		json.Unmarshal(reqBody, &p)
+		if insert2DB(db, p) == nil {
+			answer, _ := json.MarshalIndent(&responseStatus{Status: "OK", Description: "OK"}, "", "  ")
+			fmt.Fprint(w, string(answer))
+		}
+	case "comments":
+		reqBody, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			fmt.Println(err)
+		}
+		var c comment
+		json.Unmarshal(reqBody, &c)
+	default:
+		answer, _ := json.MarshalIndent(&responseStatus{Status: "error", Description: "wrong URI"}, "", "  ")
+		fmt.Fprint(w, string(answer))
+	}
+}
+
+func insert2DB(db *gorm.DB, obj interface{}) error {
+	objT := reflect.TypeOf(obj)
+	switch strings.ToLower(objT.Name()) {
+	case "user":
+		var u user
+		u = obj.(user)
+		resU := db.Select("Name", "Username", "Email", "Phone", "Website").Create(&u)
+		if resU.Error == gorm.ErrRecordNotFound {
+			return resU.Error
+		}
+		var addr address
+		addr = u.Address
+		addr.UserID = u.ID
+		resAddr := db.Select("UserID", "Street", "Suite", "City", "Zipcode").Create(&addr)
+		if resAddr.Error == gorm.ErrRecordNotFound {
+			return resAddr.Error
+		}
+		var comp company
+		comp = u.Company
+		comp.UserID = u.ID
+		resComp := db.Select("UserID", "Name", "CatchPhrase", "Bs").Create(&comp)
+		if resComp.Error == gorm.ErrRecordNotFound {
+			return resComp.Error
+		}
+		var geo geo
+		geo = u.Address.Geo
+		geo.AddressID = addr.ID
+		resGeo := db.Select("AddressID", "Lat", "Lng").Create(&geo)
+		if resGeo.Error == gorm.ErrRecordNotFound {
+			return resGeo.Error
+		}
+		return resU.Error
+	case "post":
+		var p post
+		p = obj.(post)
+		result := db.Select("UserID", "Title", "Body").Create(&p)
+		return result.Error
+	case "comment":
+		result := db.Select("PostID", "Name", "Email", "Body").Create(obj.(comment))
+		return result.Error
+	}
+	return nil
+}
+
 /*
 {
-    "id": 1,
-    "name": "Leanne Graham",
-    "username": "Bret",
-    "email": "Sincere@april.biz",
-    "address": {
-      "street": "Kulas Light",
-      "suite": "Apt. 556",
-      "city": "Gwenborough",
-      "zipcode": "92998-3874",
-      "geo": {
-        "lat": "-37.3159",
-        "lng": "81.1496"
+    "Name": "gdfgdfsh",
+    "Username": "dhdfghf",
+    "Email": "fghfghr",
+    "Address": {
+      "Street": "wefwefw",
+      "Suite": "wow ",
+      "City": "wfwefw",
+      "Zipcode": "wefwf",
+      "Geo": {
+        "Lat": -121.3422,
+        "Lng": 23.354345
       }
     },
-    "phone": "1-770-736-8031 x56442",
-    "website": "hildegard.org",
-    "company": {
-      "name": "Romaguera-Crona",
-      "catchPhrase": "Multi-layered client-server neural-net",
-      "bs": "harness real-time e-markets"
+    "Phone": "rhrthr",
+    "Website": "hrtrthr",
+    "Company": {
+      "Name": "dfwefw",
+      "CatchPhrase": "wefwef",
+      "Bs": "wefww"
     }
   }
 */
