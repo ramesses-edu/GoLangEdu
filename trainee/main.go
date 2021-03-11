@@ -219,6 +219,7 @@ func methodGet(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			fmt.Fprint(w, string(jsonB))
 		}
 	default:
+		r.Header.Set("Content-Type", "text/html; charset=UTF-8")
 		body, _ := ioutil.ReadFile("./index.html")
 		fmt.Fprint(w, string(body))
 	}
@@ -276,12 +277,14 @@ func metodPOST(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 		return
 	}
 	mode := reSymb.FindString(r.URL.Path)
+	reqBody, err := ioutil.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	switch mode {
 	case "users":
-		reqBody, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			fmt.Println(err)
-		}
 		var u user
 		json.Unmarshal(reqBody, &u)
 		if insert2DB(db, u) == nil {
@@ -289,7 +292,6 @@ func metodPOST(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			fmt.Fprint(w, string(answer))
 		}
 	case "posts":
-		reqBody, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -300,12 +302,15 @@ func metodPOST(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
 			fmt.Fprint(w, string(answer))
 		}
 	case "comments":
-		reqBody, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			fmt.Println(err)
 		}
 		var c comment
 		json.Unmarshal(reqBody, &c)
+		if insert2DB(db, c) == nil {
+			answer, _ := json.MarshalIndent(&responseStatus{Status: "OK", Description: "OK"}, "", "  ")
+			fmt.Fprint(w, string(answer))
+		}
 	default:
 		answer, _ := json.MarshalIndent(&responseStatus{Status: "error", Description: "wrong URI"}, "", "  ")
 		fmt.Fprint(w, string(answer))
